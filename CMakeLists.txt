@@ -229,12 +229,111 @@ if(NOT EXISTS "${EIGEN3_INCLUDE_DIRS}")
     message(FATAL_ERROR "Eigen 3 not found on system or in-tree")
 endif()
 
+if(WIN32)
+    include(FindVendoredPackage)
+    include(AddVendoredSubdirectory)
 
-if(WIN32 OR APPLE OR EMSCRIPTEN)
-    # On Win32 and macOS we use vendored packages, since there is little to no benefit
+    # For Windows, we prefer system libraries when available,
+    # but fall back to vendored versions if not found
+
+    # Check for system libbacktrace
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(BACKTRACE libbacktrace)
+        if(BACKTRACE_FOUND)
+            message(STATUS "Using system libbacktrace: ${BACKTRACE_LIBRARIES}")
+        endif()
+    endif()
+
+    if(PkgConfig_FOUND)
+        # Check for system ZLIB
+        pkg_check_modules(ZLIB zlib)
+    endif()
+
+    # If system libraries are not found, use vendored versions
+    if(NOT ZLIB_FOUND)
+        message(STATUS "System ZLIB not found. Using vendored version.")
+        find_vendored_package(ZLIB zlib
+            ZLIB_LIBRARY            zlibstatic
+            ZLIB_INCLUDE_DIR        ${CMAKE_SOURCE_DIR}/extlib/zlib)
+        list(APPEND ZLIB_INCLUDE_DIR ${CMAKE_BINARY_DIR}/extlib/zlib)
+    endif()
+
+    if(PkgConfig_FOUND)
+        # Check for system PNG
+        find_package(PNG)
+    endif()
+
+    if(NOT PNG_FOUND)
+        message(STATUS "System PNG not found. Using vendored version.")
+        find_vendored_package(PNG libpng
+            SKIP_INSTALL_ALL        ON
+            PNG_LIBRARY             png_static
+            PNG_ARM_NEON            "off"
+            PNG_SHARED              OFF
+            PNG_STATIC              ON
+            PNG_EXECUTABLES         OFF
+            PNG_TESTS               OFF
+            PNG_FRAMEWORK           OFF
+            PNG_PNG_INCLUDE_DIR     ${CMAKE_SOURCE_DIR}/extlib/libpng)
+        list(APPEND PNG_PNG_INCLUDE_DIR ${CMAKE_BINARY_DIR}/extlib/libpng)
+    endif()
+
+    if(PkgConfig_FOUND)
+        # Check for system Freetype
+        find_package(Freetype)
+    endif()
+
+    if(NOT FREETYPE_FOUND)
+        message(STATUS "System Freetype not found. Using vendored version.")
+        find_vendored_package(Freetype freetype
+            WITH_ZLIB               OFF
+            WITH_BZip2              OFF
+            WITH_PNG                OFF
+            WITH_HarfBuzz           OFF
+            FREETYPE_LIBRARY        freetype
+            FREETYPE_INCLUDE_DIRS   ${CMAKE_SOURCE_DIR}/extlib/freetype/include)
+    endif()
+
+    if(PkgConfig_FOUND)
+        # Check for system pixman
+        pkg_check_modules(PIXMAN pixman-1)
+    endif()
+
+    if(PIXMAN_FOUND)
+        message(STATUS "Using system pixman: ${PIXMAN_LIBRARIES}")
+    else()
+        message(STATUS "System pixman not found. Using in-tree pixman")
+        set(PIXMAN_LIBRARY          pixman)
+        set(PIXMAN_BUILD_TESTS      OFF CACHE BOOL "")
+        set(PIXMAN_BUILD_DEMOS      OFF CACHE BOOL "")
+
+        set(PIXMAN_INCLUDE_DIRS     ${CMAKE_SOURCE_DIR}/extlib/pixman/pixman)
+        list(APPEND PIXMAN_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/extlib/pixman/pixman)
+        add_vendored_subdirectory(extlib/pixman)
+    endif()
+
+    if(PkgConfig_FOUND)
+        # Check for system cairo
+        pkg_check_modules(CAIRO cairo)
+    endif()
+
+    if(CAIRO_FOUND)
+        message(STATUS "Using system cairo: ${CAIRO_LIBRARIES}")
+    else()
+        message(STATUS "System cairo not found. Using in-tree cairo")
+        add_vendored_subdirectory(extlib/cairo)
+        set(CAIRO_FOUND             YES)
+        set(CAIRO_LIBRARIES         cairo)
+        set(CAIRO_INCLUDE_DIRS      ${CMAKE_SOURCE_DIR}/extlib/cairo/src)
+        list(APPEND CAIRO_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/extlib/cairo/src)
+    endif()
+
+elseif(APPLE OR EMSCRIPTEN)
+    # On macOS and Emscripten, we use vendored packages to ensure compatibility, since there is little to no benefit
     # to trying to find system versions. In particular, trying to link to libraries from
     # Homebrew or macOS system libraries into the .app file is highly likely to result
     # in incompatibilities after upgrades.
+
 
     include(FindVendoredPackage)
     include(AddVendoredSubdirectory)
@@ -284,8 +383,9 @@ if(WIN32 OR APPLE OR EMSCRIPTEN)
     set(CAIRO_LIBRARIES         cairo)
     set(CAIRO_INCLUDE_DIRS      ${CMAKE_SOURCE_DIR}/extlib/cairo/src)
     list(APPEND CAIRO_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/extlib/cairo/src)
+
 else()
-    # On Linux and BSDs we're a good citizen and link to system libraries.
+    # On Linux and BSDs, we use system libraries
     find_package(Backtrace)
     find_package(PkgConfig REQUIRED)
     find_package(ZLIB REQUIRED)
@@ -298,21 +398,36 @@ endif()
 
 if(ENABLE_GUI)
     if(WIN32)
-        if(OPENGL STREQUAL "3")
-            message(STATUS "Using in-tree ANGLE")
-            set(ANGLE_STATIC            ON  CACHE INTERNAL "")
-            set(ANGLE_ENABLE_D3D9       ON  CACHE INTERNAL "")
-            set(ANGLE_ENABLE_D3D11      ON  CACHE INTERNAL "")
-            set(ANGLE_ENABLE_OPENGL     ON  CACHE INTERNAL "")
-            set(ANGLE_ENABLE_ESSL       ON  CACHE INTERNAL "")
-            set(ANGLE_ENABLE_GLSL       ON  CACHE INTERNAL "")
-            set(ANGLE_ENABLE_HLSL       ON  CACHE INTERNAL "")
-            add_vendored_subdirectory(extlib/angle)
-            set(OPENGL_LIBRARIES        EGL GLESv2)
-            set(OPENGL_INCLUDE_DIR      ${CMAKE_SOURCE_DIR}/extlib/angle/include)
-        else()
+	if(OPENGL STREQUAL "3")
+        # Check for system-installed ANGLE
+        find_path(ANGLE_INCLUDE_DIR NAMES GLES2/gl2.h GLES3/gl3.h EGL/egl.h
+                  PATHS $ENV{MINGW_PREFIX}/include)
+        find_library(ANGLE_EGL_LIBRARY NAMES libEGL EGL
+                     PATHS $ENV{MINGW_PREFIX}/lib)
+        find_library(ANGLE_GLESV2_LIBRARY NAMES libGLESv2 GLESv2
+                     PATHS $ENV{MINGW_PREFIX}/lib)
+
+        	if(ANGLE_INCLUDE_DIR AND ANGLE_EGL_LIBRARY AND ANGLE_GLESV2_LIBRARY)
+        	    message(STATUS "Using system-installed ANGLE")
+        	    set(ANGLE_FOUND TRUE)
+        	    set(OPENGL_LIBRARIES ${ANGLE_EGL_LIBRARY} ${ANGLE_GLESV2_LIBRARY})
+        	    set(OPENGL_INCLUDE_DIR ${ANGLE_INCLUDE_DIR})
+        	else()
+        	    message(STATUS "System-installed ANGLE not found. Using in-tree ANGLE")
+        	    set(ANGLE_STATIC            ON  CACHE INTERNAL "")
+        	    set(ANGLE_ENABLE_D3D9       ON  CACHE INTERNAL "")
+        	    set(ANGLE_ENABLE_D3D11      ON  CACHE INTERNAL "")
+        	    set(ANGLE_ENABLE_OPENGL     ON  CACHE INTERNAL "")
+        	    set(ANGLE_ENABLE_ESSL       ON  CACHE INTERNAL "")
+        	    set(ANGLE_ENABLE_GLSL       ON  CACHE INTERNAL "")
+        	    set(ANGLE_ENABLE_HLSL       ON  CACHE INTERNAL "")
+        	    add_vendored_subdirectory(extlib/angle)
+        	    set(OPENGL_LIBRARIES        EGL GLESv2)
+        	    set(OPENGL_INCLUDE_DIR      ${CMAKE_SOURCE_DIR}/extlib/angle/include)
+        	endif()
+	else()
             find_package(OpenGL REQUIRED)
-        endif()
+    	endif()
 
         if(MSVC AND ${CMAKE_SIZEOF_VOID_P} EQUAL 4)
             message(STATUS "Using prebuilt SpaceWare")
