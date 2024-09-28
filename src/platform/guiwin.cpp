@@ -43,6 +43,7 @@
 #   define EGL_EGLEXT_PROTOTYPES
 #   include <EGL/egl.h>
 #   include <EGL/eglext.h>
+#   include <EGL/eglext_angle.h>
 #endif
 
 #if defined(HAVE_SPACEWARE)
