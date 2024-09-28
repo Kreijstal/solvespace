@@ -294,6 +294,14 @@ if(WIN32)
             FREETYPE_INCLUDE_DIRS   ${CMAKE_SOURCE_DIR}/extlib/freetype/include)
     endif()
 
+    if(PkgConfig_FOUND)
+    # Check for system pixman
+    pkg_check_modules(PIXMAN pixman-1)
+    endif()
+
+    if(PIXMAN_FOUND)
+        message(STATUS "Using system pixman: ${PIXMAN_LIBRARIES}")
+    else()
     message(STATUS "Using in-tree pixman")
     set(PIXMAN_FOUND            YES)
     set(PIXMAN_LIBRARY          pixman)
@@ -303,6 +311,7 @@ if(WIN32)
     set(PIXMAN_INCLUDE_DIRS     ${CMAKE_SOURCE_DIR}/extlib/pixman/pixman)
     list(APPEND PIXMAN_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/extlib/pixman/pixman)
     add_vendored_subdirectory(extlib/pixman)
+    endif()
 
     message(STATUS "Using in-tree cairo")
     add_vendored_subdirectory(extlib/cairo)
